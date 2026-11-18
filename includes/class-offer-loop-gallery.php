@@ -98,6 +98,9 @@ class OLG_Offer_Loop_Gallery extends \Elementor\Widget_Base {
             [
                 'label' => 'Offer Link',
                 'type' => \Elementor\Controls_Manager::URL,
+				'dynamic' => [
+         		   'active' => true,
+      			],
                 'placeholder' => 'https://yourwebsite.com',
                 'options' => ['url', 'is_external', 'nofollow'],
                 'default' => ['url' => ''],
