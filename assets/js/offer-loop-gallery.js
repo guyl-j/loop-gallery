@@ -230,11 +230,8 @@
             startX = event.clientX;
             lastX = event.clientX;
 
-            viewport.classList.add('is-dragging');
-
-            try {
-                viewport.setPointerCapture(event.pointerId);
-            } catch (error) {}
+            // Do not capture the pointer on press: doing so can
+            // redirect a normal link click to the viewport.
 
         }
 
@@ -244,8 +241,18 @@
 
             const delta = event.clientX - lastX;
 
-            if (Math.abs(event.clientX - startX) > 5) {
+            if (!moved && Math.abs(event.clientX - startX) > 5) {
                 moved = true;
+                viewport.classList.add('is-dragging');
+
+                try {
+                    viewport.setPointerCapture(event.pointerId);
+                } catch (error) {}
+            }
+
+            if (!moved) {
+                lastX = event.clientX;
+                return;
             }
 
             position += delta;
