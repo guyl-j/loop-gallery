@@ -1,346 +1,509 @@
-/* ==========================================
-   OFFER LOOP GALLERY
-   VERSION 1.6
-========================================== */
+(function () {
 
+    'use strict';
 
-/* MAIN GALLERY */
+    function initOfferGallery(gallery) {
 
-.olg-gallery {
-    width: 100%;
-    position: relative;
-    overflow: hidden;
-    padding: 0;
+        if (gallery.dataset.olgReady === 'true') {
+            return;
+        }
 
-    --olg-offset: 20px;
-    --olg-gap: 25px;
+        const track = gallery.querySelector('.olg-track');
+        const viewport = gallery.querySelector('.olg-viewport');
+        const original = track && track.querySelector('.olg-group');
 
-    box-sizing: border-box;
-}
+        if (!track || !viewport || !original) return;
+        if (!original.children.length) return;
 
+        gallery.dataset.olgReady = 'true';
 
-/* VIEWPORT */
+        // ======================================
+        // SETTINGS
+        // ======================================
 
-.olg-viewport {
-    width: 100%;
-    overflow: hidden;
-    cursor: grab;
-    touch-action: pan-y;
-    user-select: none;
-    box-sizing: border-box;
-}
+        let cycleWidth = 0;
+        let position = 0;
+        let beforeCount = 0;
 
-.olg-viewport.is-dragging {
-    cursor: grabbing;
-}
+        let lastTime = 0;
+        let animationFrame = null;
 
+        let dragging = false;
+        let startX = 0;
+        let lastX = 0;
+        let moved = false;
 
-/* TRACK */
+        let resizeTimer = null;
+        let hovering = false;
 
-.olg-track {
-    display: flex;
-    width: max-content;
-    will-change: transform;
-}
+        let resizeObserver = null;
+        let mutationObserver = null;
 
+        const autoplay =
+            gallery.dataset.autoplay === 'true';
 
-/* GROUP */
+        const pauseOnHover =
+            gallery.dataset.pause === 'true';
 
-.olg-group {
-    display: flex;
-    flex: 0 0 auto;
-    align-items: flex-start;
+        const speed = Math.max(
+            5,
+            Math.min(150, Number(gallery.dataset.speed) || 35)
+		);	
+		
+		const direction = gallery.dataset.direction === 'right'
+   			 ? 1
+  			 : -1;	
+        
 
-    gap: var(--olg-gap);
+        // ======================================
+        // CREATE ACCESSIBLE CLONES
+        // ======================================
 
-    padding-top: calc(var(--olg-offset) + var(--olg-extra-top, 0px));
-    padding-bottom: calc(var(--olg-offset) + var(--olg-extra-bottom, 0px));
-    padding-right: var(--olg-gap);
+        function createClone() {
 
-    box-sizing: border-box;
-}
+            const clone = original.cloneNode(true);
 
+            clone.classList.add('olg-clone');
 
-/* CARDS */
+            clone.setAttribute('aria-hidden', 'true');
 
-.olg-card {
-    flex: 0 0 auto;
-    width: 280px;
-    min-width: 0;
-    position: relative;
-    box-sizing: border-box;
-}
+            clone.querySelectorAll('a').forEach(function (link) {
+                link.setAttribute('tabindex', '-1');
+            });
 
+            clone.querySelectorAll('img').forEach(function (img) {
+                img.setAttribute('draggable', 'false');
+            });
 
-/* ALTERNATING POSITIONS */
+            return clone;
+        }
 
-.olg-card-up {
-    top: calc(var(--olg-offset) * -1);
-}
+        // ======================================
+        // BUILD CONTINUOUS TRACK
+        // ======================================
 
-.olg-card-down {
-    top: var(--olg-offset);
-}
+        function buildTrack() {
 
+            // Remove previously generated clones.
 
-/* LINKS */
+            track.querySelectorAll('.olg-clone').forEach(function (clone) {
+                clone.remove();
+            });
 
-.olg-link {
-    display: block;
-    width: 100%;
-    color: inherit;
-    text-decoration: none;
-}
+            cycleWidth = original.getBoundingClientRect().width;
 
+            if (cycleWidth <= 0) return;
 
-/* IMAGE FRAME */
+            // Create enough copies to cover the viewport
+            // in both directions, including a safety margin.
 
-.olg-image-wrap {
-    display: block;
-    position: relative;
+            const copies = Math.ceil(
+                viewport.clientWidth / cycleWidth
+            ) + 2;
 
-    width: 100%;
-    height: 350px;
+            beforeCount = copies;
 
-    overflow: hidden;
+            const beforeFragment = document.createDocumentFragment();
+            const afterFragment = document.createDocumentFragment();
 
-    background-color: #f2f2f2;
+            for (let i = 0; i < copies; i++) {
+                beforeFragment.appendChild(createClone());
+                afterFragment.appendChild(createClone());
+            }
 
-    box-sizing: border-box;
+            track.insertBefore(beforeFragment, original);
+            track.appendChild(afterFragment);
 
-    transition: box-shadow 0.35s ease;
-}
+            // Start at the original group's position.
 
+            position = -(beforeCount * cycleWidth);
 
-/* IMAGE */
+            updatePosition();
 
-.olg-image {
-    display: block;
+        }
 
-    width: 100%;
-    height: 100%;
-    max-width: none;
+        // ======================================
+        // MEASURE
+        // ======================================
 
-    object-fit: cover;
-    object-position: center center;
+        function measure() {
 
-    border-radius: inherit;
+            const newWidth =
+                original.getBoundingClientRect().width;
 
-    margin: 0;
-    padding: 0;
+            if (newWidth <= 0) return;
 
-    pointer-events: none;
-    transform: none;
+            if (Math.abs(newWidth - cycleWidth) > 0.5) {
+                buildTrack();
+            }
 
-    transition: transform 0.35s ease;
+        }
 
-    box-sizing: border-box;
-}
+        // ======================================
+        // UPDATE POSITION
+        // ======================================
 
+        function updatePosition() {
 
-/* IMAGE HOVER */
+            track.style.transform =
+                'translate3d(' + position + 'px, 0, 0)';
 
-.olg-card:hover .olg-image {
-    transform: scale(1.025);
-}
+        }
 
+        // ======================================
+        // SEAMLESS LOOP NORMALISATION
+        // ======================================
 
-/* TITLES */
+        function normalize() {
 
-.olg-title {
-    display: block;
-    position: relative;
+            if (!cycleWidth) return;
 
-    width: 100%;
+            const lowerLimit =
+                -(beforeCount + 1) * cycleWidth;
 
-    margin-top: 15px;
-    margin-bottom: 0;
+            const upperLimit =
+                -(beforeCount - 1) * cycleWidth;
 
-    padding: 0;
+            while (position <= lowerLimit) {
+                position += cycleWidth;
+            }
 
-    font-size: 20px;
-    font-weight: 600;
-    line-height: 1.4;
+            while (position > upperLimit) {
+                position -= cycleWidth;
+            }
 
-    white-space: normal;
-    overflow: visible;
-    overflow-wrap: break-word;
+        }
 
-    box-sizing: border-box;
-    z-index: 2;
+        // ======================================
+        // ANIMATION
+        // ======================================
 
-    transition: color 0.3s ease;
-}
+        function animate(time) {
 
+            if (!lastTime) {
+                lastTime = time;
+            }
 
-/* ACCESSIBILITY */
+            const delta = Math.min(
+                (time - lastTime) / 1000,
+                0.05
+            );
 
-.olg-card a:focus-visible {
-    outline: 2px solid currentColor;
-    outline-offset: 5px;
-}
+            lastTime = time;
 
+            if (
+                autoplay &&
+                !dragging &&
+                !(pauseOnHover && hovering) &&
+                cycleWidth > 0
+            ) {
 
-/* TABLET */
+                position += direction * speed * delta;
 
-@media (max-width: 1024px) {
+                normalize();
 
-    .olg-card {
-        width: 240px;
+                updatePosition();
+
+            }
+
+            animationFrame =
+                requestAnimationFrame(animate);
+
+        }
+
+        // ======================================
+        // DRAGGING
+        // ======================================
+
+        function pointerDown(event) {
+
+            if (
+                event.pointerType === 'mouse' &&
+                event.button !== 0
+            ) {
+                return;
+            }
+
+            dragging = true;
+            moved = false;
+
+            startX = event.clientX;
+            lastX = event.clientX;
+
+            viewport.classList.add('is-dragging');
+
+            try {
+                viewport.setPointerCapture(event.pointerId);
+            } catch (error) {}
+
+        }
+
+        function pointerMove(event) {
+
+            if (!dragging) return;
+
+            const delta = event.clientX - lastX;
+
+            if (Math.abs(event.clientX - startX) > 5) {
+                moved = true;
+            }
+
+            position += delta;
+            lastX = event.clientX;
+
+            normalize();
+            updatePosition();
+
+        }
+
+        function pointerUp(event) {
+
+            if (!dragging) return;
+
+            dragging = false;
+
+            viewport.classList.remove('is-dragging');
+
+            try {
+
+                if (viewport.hasPointerCapture(event.pointerId)) {
+                    viewport.releasePointerCapture(event.pointerId);
+                }
+
+            } catch (error) {}
+
+        }
+
+        viewport.addEventListener('pointerdown', pointerDown);
+        viewport.addEventListener('pointermove', pointerMove);
+        viewport.addEventListener('pointerup', pointerUp);
+        viewport.addEventListener('pointercancel', pointerUp);
+        viewport.addEventListener('lostpointercapture', pointerUp);
+
+        // ======================================
+        // PREVENT CLICK AFTER DRAG
+        // ======================================
+
+        viewport.addEventListener('click', function (event) {
+
+            if (moved) {
+
+                event.preventDefault();
+                event.stopPropagation();
+
+            }
+
+            moved = false;
+
+        }, true);
+
+        viewport.addEventListener('dragstart', function (event) {
+            event.preventDefault();
+        });
+
+        // ======================================
+        // PAUSE ON HOVER
+        // ======================================
+
+        if (pauseOnHover) {
+
+            viewport.addEventListener('mouseenter', function () {
+                hovering = true;
+            });
+
+            viewport.addEventListener('mouseleave', function () {
+                hovering = false;
+            });
+
+        }
+
+        // ======================================
+        // WAIT FOR IMAGES
+        // ======================================
+
+        function waitForImages() {
+
+            const images = Array.from(
+                original.querySelectorAll('img')
+            );
+
+            return Promise.all(images.map(function (img) {
+
+                if (img.complete) {
+                    return Promise.resolve();
+                }
+
+                return new Promise(function (resolve) {
+
+                    img.addEventListener('load', resolve, {
+                        once: true
+                    });
+
+                    img.addEventListener('error', resolve, {
+                        once: true
+                    });
+
+                });
+
+            }));
+
+        }
+
+        // ======================================
+        // INITIALISE
+        // ======================================
+
+        function initialise() {
+
+            buildTrack();
+
+            if (autoplay && !animationFrame) {
+
+                lastTime = 0;
+
+                animationFrame =
+                    requestAnimationFrame(animate);
+
+            }
+
+        }
+
+        waitForImages().then(function () {
+
+            requestAnimationFrame(function () {
+
+                requestAnimationFrame(initialise);
+
+            });
+
+        });
+
+        // ======================================
+        // RESIZE
+        // ======================================
+
+        function handleResize() {
+
+            clearTimeout(resizeTimer);
+
+            resizeTimer = setTimeout(function () {
+
+                if (!gallery.isConnected) return;
+
+                buildTrack();
+
+            }, 150);
+
+        }
+
+        window.addEventListener('resize', handleResize);
+
+        if (window.ResizeObserver) {
+
+            resizeObserver = new ResizeObserver(function () {
+
+                const newWidth =
+                    original.getBoundingClientRect().width;
+
+                if (
+                    newWidth > 0 &&
+                    Math.abs(newWidth - cycleWidth) > 0.5
+                ) {
+                    buildTrack();
+                }
+
+            });
+
+            resizeObserver.observe(original);
+            resizeObserver.observe(viewport);
+
+        }
+
+        // ======================================
+        // CLEANUP
+        // ======================================
+
+        if (window.MutationObserver) {
+
+            mutationObserver = new MutationObserver(function () {
+
+                if (!gallery.isConnected) {
+
+                    if (animationFrame) {
+                        cancelAnimationFrame(animationFrame);
+                    }
+
+                    clearTimeout(resizeTimer);
+
+                    window.removeEventListener(
+                        'resize',
+                        handleResize
+                    );
+
+                    if (resizeObserver) {
+                        resizeObserver.disconnect();
+                    }
+
+                    mutationObserver.disconnect();
+
+                }
+
+            });
+
+            mutationObserver.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+
+        }
+
     }
 
-    .olg-image-wrap {
-        height: 300px;
+    // ======================================
+    // INITIALISE ALL GALLERIES
+    // ======================================
+
+    function initAll() {
+
+        document.querySelectorAll('.olg-gallery').forEach(
+            initOfferGallery
+        );
+
     }
 
-}
+    if (document.readyState === 'loading') {
 
+        document.addEventListener('DOMContentLoaded', initAll);
 
-/* MOBILE */
+    } else {
 
-@media (max-width: 767px) {
+        initAll();
 
-    .olg-card {
-        width: 72vw;
     }
 
-    .olg-image-wrap {
-        height: 300px;
+    // ======================================
+    // ELEMENTOR EDITOR SUPPORT
+    // ======================================
+
+    if (window.jQuery) {
+
+        jQuery(window).on('elementor/frontend/init', function () {
+
+            if (!window.elementorFrontend) return;
+
+            elementorFrontend.hooks.addAction(
+                'frontend/element_ready/offer_loop_gallery.default',
+                function ($scope) {
+
+                    $scope[0]
+                        .querySelectorAll('.olg-gallery')
+                        .forEach(initOfferGallery);
+
+                }
+            );
+
+        });
+
     }
 
-    .olg-title {
-        font-size: 17px;
-        line-height: 1.4;
-    }
-
-}
-
-
-/* ==========================================
-   OFFER IMAGE OVERLAY BUTTON
-========================================== */
-
-
-/* BUTTON */
-
-.olg-overlay-button {
-    position: absolute;
-
-    top: 50%;
-    left: 50%;
-
-    transform: translate(-50%, -50%);
-
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-
-    width: max-content;
-    max-width: calc(100% - 30px);
-
-    padding: 12px 28px;
-
-    box-sizing: border-box;
-
-    font-size: 15px;
-    font-weight: 600;
-    line-height: 1.2;
-
-    text-align: center;
-    white-space: nowrap;
-
-    cursor: pointer;
-
-    z-index: 5;
-
-    transition:
-        background-color 0.3s ease,
-        color 0.3s ease,
-        border-color 0.3s ease,
-        transform 0.3s ease;
-}
-
-
-/* DEFAULT BUTTON TEXT */
-
-.olg-button-text {
-    display: block;
-    transition: opacity 0.25s ease;
-}
-
-
-/* HOVER BUTTON TEXT */
-
-.olg-button-hover-text {
-    display: block;
-
-    position: absolute;
-
-    top: 50%;
-    left: 50%;
-
-    width: 100%;
-
-    transform: translate(-50%, -50%);
-
-    opacity: 0;
-
-    text-align: center;
-    white-space: nowrap;
-
-    transition: opacity 0.25s ease;
-
-    pointer-events: none;
-}
-
-
-/* HOVER TEXT SWITCH */
-
-@media (hover: hover) {
-
-    .olg-card:hover .olg-button-text {
-        opacity: 0;
-    }
-
-    .olg-card:hover .olg-button-hover-text {
-        opacity: 1;
-    }
-
-}
-
-
-/* KEYBOARD ACCESSIBILITY */
-
-.olg-card:focus-within .olg-button-text {
-    opacity: 0;
-}
-
-.olg-card:focus-within .olg-button-hover-text {
-    opacity: 1;
-}
-
-
-/* KEEP BUTTON ABOVE IMAGE */
-
-.olg-overlay-button,
-.olg-button-text,
-.olg-button-hover-text {
-    pointer-events: none;
-}
-
-
-/* ==========================================
-   REDUCED MOTION
-========================================== */
-
-@media (prefers-reduced-motion: reduce) {
-
-    .olg-image,
-    .olg-image-wrap,
-    .olg-overlay-button,
-    .olg-button-text,
-    .olg-button-hover-text {
-        transition: none;
-    }
-
-}
+})();
